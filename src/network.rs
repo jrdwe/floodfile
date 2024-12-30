@@ -43,6 +43,9 @@ impl Channel {
         self.interface.name.clone()
     }
 
+    pub fn send() {}
+    pub fn recv() {}
+
     // send to network func
     // fetch from network func
 }

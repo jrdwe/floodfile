@@ -80,19 +80,27 @@ pub fn run() {
                 LinearLayout::vertical()
                     .child(
                         Dialog::around(
-                            Panel::new(EditView::new().on_submit(move |_siv, name: &str| {
-                                display_tx
-                                    .send(DisplayCommand::NewFile(name.to_string()))
-                                    .unwrap()
-                            }))
-                            .title("file path")
-                            .with_name("file_input"),
+                            Panel::new(
+                                EditView::new()
+                                    .on_submit(move |siv, name: &str| {
+                                        siv.call_on_name("file_input", |field: &mut EditView| {
+                                            field.set_content("")
+                                        });
+
+                                        // should it strip path information? security is not a concern!
+                                        display_tx
+                                            .send(DisplayCommand::NewFile(name.to_string()))
+                                            .unwrap()
+                                    })
+                                    .with_name("file_input"),
+                            )
+                            .title("file path"),
                         )
                         .title("send a file over arp")
                         .full_width(),
                     )
                     .child(
-                        Dialog::around(
+                        Panel::new(
                             SelectView::new()
                                 .with_all(
                                     usable_interfaces().into_iter().map(|i| {
