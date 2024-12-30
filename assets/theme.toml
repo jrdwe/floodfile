@@ -1,0 +1,13 @@
+shadow = false
+borders = "outset"  
+
+[colors]
+background = ""
+view       = "black"
+
+title_primary = "white"
+highlight = "blue"
+
+primary   = "white"
+secondary = "white"
+tertiary  = "white"
