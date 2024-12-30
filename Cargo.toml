@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+crossbeam = "0.8.4"
 cursive = {version = "0.21.1", features = ["toml"]}
 pnet = "0.35.0"
 

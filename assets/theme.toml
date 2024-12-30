@@ -6,8 +6,9 @@ background = ""
 view       = "black"
 
 title_primary = "white"
-highlight = "blue"
+highlight = "#7B68EE"
+highlight_inactive = "#7B68EE"
 
 primary   = "white"
-secondary = "white"
+secondary = "#F5F5F5"
 tertiary  = "white"
