@@ -6,11 +6,13 @@ use cursive::{
     views::{Button, Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
 };
 use pnet::datalink::NetworkInterface;
+use std::fs;
 use std::thread;
 
 enum DisplayCommand {
     NewFile(String),
     FetchFile(String),
+    ChangeInterface(String),
 }
 
 enum NetworkCommand {
@@ -21,6 +23,7 @@ enum NetworkCommand {
 
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
+    // should assert len > 0 for no interfaces would not work
     let mut channel = Channel::new(interfaces[0].clone());
 
     loop {
@@ -44,6 +47,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                         .find(|i| i.name == name)
                         .unwrap();
 
+                    eprintln!("changed interface: {}", interface.name);
                     channel = Channel::new(interface);
                 }
             }
@@ -59,7 +63,6 @@ pub fn run() {
     let (network_tx, network_rx) = unbounded::<NetworkCommand>();
 
     thread::spawn({
-        // requires that move takes no ownership of display_tx
         let display_tx = display_tx.clone();
         move || network_thread(display_tx, network_rx)
     });
@@ -82,15 +85,17 @@ pub fn run() {
                         Dialog::around(
                             Panel::new(
                                 EditView::new()
-                                    .on_submit(move |siv, name: &str| {
-                                        siv.call_on_name("file_input", |field: &mut EditView| {
-                                            field.set_content("")
-                                        });
+                                    .on_submit({
+                                        let tx = display_tx.clone();
+                                        move |siv, name: &str| {
+                                            siv.call_on_name(
+                                                "file_input",
+                                                |field: &mut EditView| field.set_content(""),
+                                            );
 
-                                        // should it strip path information? security is not a concern!
-                                        display_tx
-                                            .send(DisplayCommand::NewFile(name.to_string()))
-                                            .unwrap()
+                                            tx.send(DisplayCommand::NewFile(name.to_string()))
+                                                .unwrap()
+                                        }
                                     })
                                     .with_name("file_input"),
                             )
@@ -107,7 +112,13 @@ pub fn run() {
                                         (format!("{0}: {1}", i.name, i.mac.unwrap()), i.name)
                                     }),
                                 )
-                                .on_submit(move |_siv, name: &String| ()),
+                                .on_submit({
+                                    let tx = display_tx.clone();
+                                    move |_, name: &String| {
+                                        tx.send(DisplayCommand::ChangeInterface(name.to_string()))
+                                            .unwrap()
+                                    }
+                                }),
                         )
                         .title("interfaces")
                         .full_height(),
@@ -132,6 +143,11 @@ pub fn run() {
         while let Ok(command) = display_rx.try_recv() {
             match command {
                 DisplayCommand::NewFile(file) => {
+                    if !fs::exists(&file).unwrap() {
+                        eprintln!("file does not exist: {0}", file);
+                        continue;
+                    }
+
                     siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
                         let available =
                             Dialog::around(TextView::new(file)).button("download", |s| s.quit());
@@ -139,7 +155,18 @@ pub fn run() {
                         file_list.add_child(available);
                     });
                 }
+                DisplayCommand::ChangeInterface(interface) => {
+                    network_tx
+                        .send(NetworkCommand::ChangeInterface(interface.clone()))
+                        .unwrap();
+
+                    // TODO: only if successful? need error handling here
+                    siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
+                        file_list.clear();
+                    });
+                }
                 DisplayCommand::FetchFile(id) => {
+                    // TODO: poll for existing file
                     println!("id: {}", id);
                 }
             }
