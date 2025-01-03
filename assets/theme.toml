@@ -2,7 +2,7 @@ shadow = false
 borders = "outset"  
 
 [colors]
-background = ""
+background = "black"
 view       = "black"
 
 title_primary = "white"

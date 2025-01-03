@@ -1,14 +1,15 @@
 use pnet::datalink::Channel::Ethernet;
-use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::Packet;
 use pnet::{
     datalink::{DataLinkReceiver, DataLinkSender, NetworkInterface},
     util::MacAddr,
 };
+use std::fs;
+use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
 const MSG_PREAMBLE: &[u8] = b"file";
-const MSG_LEN_MAX: usize = (u8::MAX as usize) - MSG_PREAMBLE.len();
 
 pub fn usable_interfaces() -> Vec<NetworkInterface> {
     let mut interfaces = pnet::datalink::interfaces()
@@ -24,6 +25,7 @@ pub fn usable_interfaces() -> Vec<NetworkInterface> {
 
 pub struct Channel {
     src_mac_addr: MacAddr,
+    local_path: String,
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
     rx: Box<dyn DataLinkReceiver>,
@@ -31,7 +33,10 @@ pub struct Channel {
 
 impl Channel {
     pub fn new(interface: NetworkInterface) -> Self {
-        let (tx, rx) = match pnet::datalink::channel(&interface, Default::default()) {
+        let mut config = pnet::datalink::Config::default();
+        config.read_timeout = Some(Duration::from_millis(750));
+
+        let (tx, rx) = match pnet::datalink::channel(&interface, config) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             Ok(_) => panic!("Unhandled channel type"),
             Err(e) => panic!("Error occurred fetching channel: {}", e),
@@ -39,6 +44,7 @@ impl Channel {
 
         Self {
             src_mac_addr: interface.mac.unwrap(),
+            local_path: String::from("/tmp/"),
             interface,
             tx,
             rx,
@@ -49,11 +55,21 @@ impl Channel {
         self.interface.name.clone()
     }
 
-    pub fn send(&self, file_name: String) {
-        // TODO: chunk out and send the file via send_chunk
+    pub fn set_path(&mut self, path: &String) {
+        self.local_path = path.clone();
     }
 
-    pub fn send_chunk(&mut self, file: &[u8]) {
+    pub fn path(&self) -> String {
+        self.local_path.clone()
+    }
+
+    pub fn send(&mut self, file_name: String) {
+        // TODO: chunk out and send the file via send_chunk
+        let file_content: Vec<u8> = fs::read(&file_name).unwrap();
+        self.send_chunk(&file_content);
+    }
+
+    pub fn send_chunk(&mut self, file: &Vec<u8>) {
         let data = [MSG_PREAMBLE, file].concat();
         assert!(data.len() as u8 <= u8::MAX);
 
@@ -62,7 +78,7 @@ impl Channel {
             &[8, 0],                     // protocol type
             &[6][..],                    // hardware size
             &[data.len() as u8],         // payload length
-            &[0, 2],                     // opcode
+            &[0, 1],                     // opcode - req
             &self.src_mac_addr.octets(), // sender mac
             &data,                       // payload!
             &[0; 6],                     // target mac
@@ -87,9 +103,24 @@ impl Channel {
 
     pub fn recv(&mut self) {
         // TODO: parse packets received as valid and assemble file
-
         if let Ok(packet) = self.rx.next() {
-            // packet?
+            let packet = EthernetPacket::new(packet).unwrap();
+            if packet.get_ethertype() != EtherTypes::Arp || packet.payload()[7] != 1 {
+                eprintln!("not taking this non arp");
+                return;
+            }
+
+            eprintln!("{:?}", &packet.payload()[14..18]);
+            if !(&packet.payload()[14..18] != MSG_PREAMBLE) {
+                return;
+            }
+
+            let chunk_len: u8 = packet.payload()[5];
+            // let chunk: [u8] = packet.payload()[14..(chunk_len as usize)];
+
+            // throw bytes into file on disk?
         }
+
+        // probably extract file here? somewhere?
     }
 }

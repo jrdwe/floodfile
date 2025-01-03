@@ -4,6 +4,7 @@ use cursive::{
     traits::{Nameable, Resizable, Scrollable},
     view::ScrollStrategy,
     views::{Button, Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
+    Cursive,
 };
 use pnet::datalink::NetworkInterface;
 use std::fs;
@@ -16,6 +17,7 @@ enum DisplayCommand {
 }
 
 enum NetworkCommand {
+    UpdateLocalPath(String),
     AdvertiseFile(String),
     SendFile(String),
     ChangeInterface(String),
@@ -32,10 +34,9 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                 NetworkCommand::AdvertiseFile(filepath) => {
                     println!("filepath: {}", filepath);
                 }
-                NetworkCommand::SendFile(id) => {
-                    println!("id: {}", id);
-                    // grab from disk
-                    // spam over network!
+                NetworkCommand::SendFile(file) => {
+                    // TODO: fix this up after test - sends a small file
+                    channel.send(file);
                 }
                 NetworkCommand::ChangeInterface(name) => {
                     if channel.interface_name() == name {
@@ -50,33 +51,21 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                     eprintln!("changed interface: {}", interface.name);
                     channel = Channel::new(interface);
                 }
+                NetworkCommand::UpdateLocalPath(path) => {
+                    // TODO: check it's valid
+                    channel.set_path(&path);
+                }
             }
         }
+
+        channel.recv();
     }
 
     // needs to set a channel -> define in networking
     // send display updates and receive network updates
 }
 
-pub fn run() {
-    let (display_tx, display_rx) = unbounded::<DisplayCommand>();
-    let (network_tx, network_rx) = unbounded::<NetworkCommand>();
-
-    thread::spawn({
-        let display_tx = display_tx.clone();
-        move || network_thread(display_tx, network_rx)
-    });
-
-    let mut siv = cursive::default();
-    siv.set_autohide_menu(false);
-
-    // build channels for networking + display handling
-    // improved error handling
-    // show interface options?
-
-    siv.menubar().add_leaf("quit", |siv| siv.quit());
-    siv.load_toml(include_str!("../assets/theme.toml")).unwrap();
-
+fn start_interface(siv: &mut Cursive, display_tx: Sender<DisplayCommand>) {
     siv.add_fullscreen_layer(
         LinearLayout::horizontal()
             .child(
@@ -136,6 +125,54 @@ pub fn run() {
                 .title("available files"),
             ),
     );
+}
+
+fn change_path(siv: &mut Cursive, network_tx: Sender<NetworkCommand>) {
+    siv.add_layer(
+        Dialog::around(EditView::new().on_submit({
+            let tx = network_tx.clone();
+            move |siv, name: &str| {
+                tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
+                    .unwrap();
+                siv.pop_layer();
+            }
+        }))
+        .title("Enter path to store files"),
+    );
+}
+
+pub fn run() {
+    let (display_tx, display_rx) = unbounded::<DisplayCommand>();
+    let (network_tx, network_rx) = unbounded::<NetworkCommand>();
+
+    thread::spawn({
+        let display_tx = display_tx.clone();
+        move || network_thread(display_tx, network_rx)
+    });
+
+    let mut siv = cursive::default();
+    siv.set_autohide_menu(false);
+
+    siv.menubar().add_leaf("quit", |siv| siv.quit());
+    siv.menubar().add_leaf("path", {
+        let tx = network_tx.clone();
+        move |siv| change_path(siv, tx.clone())
+    });
+    siv.load_toml(include_str!("../assets/theme.toml")).unwrap();
+
+    // TODO: possibly leave path as menu option and have instructions on boot?
+    siv.add_layer(
+        Dialog::around(EditView::new().on_submit({
+            // TODO: cloning?
+            let tx = network_tx.clone();
+            move |siv, name: &str| {
+                tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
+                    .unwrap();
+                start_interface(siv, display_tx.clone())
+            }
+        }))
+        .title("Enter path to store files"),
+    );
 
     let mut siv = siv.runner();
     while siv.is_running() {
@@ -148,14 +185,19 @@ pub fn run() {
                         continue;
                     }
 
-                    siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
-                        let available =
-                            Dialog::around(TextView::new(file)).button("download", |s| s.quit());
+                    // TODO: fix up clones here
+                    let tx = network_tx.clone();
+                    siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
+                        let available = Dialog::around(TextView::new(file.clone()))
+                            .button("download", move |s| {
+                                tx.send(NetworkCommand::SendFile(file.clone())).unwrap()
+                            });
 
                         file_list.add_child(available);
                     });
                 }
                 DisplayCommand::ChangeInterface(interface) => {
+                    eprintln!("sending change interface command");
                     network_tx
                         .send(NetworkCommand::ChangeInterface(interface.clone()))
                         .unwrap();
@@ -174,6 +216,4 @@ pub fn run() {
 
         siv.step();
     }
-
-    // loop over ui command here!
 }
