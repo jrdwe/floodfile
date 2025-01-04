@@ -6,7 +6,8 @@ use pnet::{
     util::MacAddr,
 };
 use std::fs;
-use std::time::Duration;
+use std::fs::File;
+use std::io::prelude::*;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
 const MSG_PREAMBLE: &[u8] = b"file";
@@ -34,7 +35,7 @@ pub struct Channel {
 impl Channel {
     pub fn new(interface: NetworkInterface) -> Self {
         let mut config = pnet::datalink::Config::default();
-        config.read_timeout = Some(Duration::from_millis(750));
+        // config.read_timeout = Some(Duration::from_millis(1000));
 
         let (tx, rx) = match pnet::datalink::channel(&interface, config) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
@@ -57,10 +58,6 @@ impl Channel {
 
     pub fn set_path(&mut self, path: &String) {
         self.local_path = path.clone();
-    }
-
-    pub fn path(&self) -> String {
-        self.local_path.clone()
     }
 
     pub fn send(&mut self, file_name: String) {
@@ -86,8 +83,6 @@ impl Channel {
         ]
         .concat();
 
-        eprintln!("{:?}", arp_packet);
-
         let mut ethernet_buffer = vec![0; ETHERNET_HEADER_SIZE + arp_packet.len()];
         let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
         ethernet_packet.set_source(self.src_mac_addr);
@@ -95,6 +90,8 @@ impl Channel {
         ethernet_packet.set_ethertype(EtherTypes::Arp);
         ethernet_packet.set_payload(&arp_packet);
 
+        eprintln!("sending packet");
+        eprintln!("file: {:?}", file);
         self.tx
             .send_to(ethernet_packet.packet(), None)
             .unwrap()
@@ -103,24 +100,34 @@ impl Channel {
 
     pub fn recv(&mut self) {
         // TODO: parse packets received as valid and assemble file
+
+        // BUG: diff arpchat packet eth type over wireshark against mine
         if let Ok(packet) = self.rx.next() {
             let packet = EthernetPacket::new(packet).unwrap();
-            if packet.get_ethertype() != EtherTypes::Arp || packet.payload()[7] != 1 {
-                eprintln!("not taking this non arp");
+            if packet.get_ethertype() != EtherTypes::Arp {
                 return;
             }
 
+            eprintln!("{:?}", MSG_PREAMBLE);
             eprintln!("{:?}", &packet.payload()[14..18]);
-            if !(&packet.payload()[14..18] != MSG_PREAMBLE) {
+            if &packet.payload()[14..18] != MSG_PREAMBLE {
                 return;
             }
 
-            let chunk_len: u8 = packet.payload()[5];
+            eprintln!("captured arp packet");
+            let chunk_len = packet.payload()[5] as usize;
+            eprintln!("chunklen: {0}", chunk_len);
+            eprintln!("file: {:?}", &packet.payload()[18..chunk_len]);
+
+            let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
+            file.write_all(&packet.payload()[18..(18 + chunk_len)])
+                .unwrap();
+
             // let chunk: [u8] = packet.payload()[14..(chunk_len as usize)];
+            // eprintln!("{:?}", &packet.payload()[14..]);
+            // eprintln!("{:?}", chunk);
 
             // throw bytes into file on disk?
         }
-
-        // probably extract file here? somewhere?
     }
 }

@@ -161,18 +161,20 @@ pub fn run() {
     siv.load_toml(include_str!("../assets/theme.toml")).unwrap();
 
     // TODO: possibly leave path as menu option and have instructions on boot?
-    siv.add_layer(
-        Dialog::around(EditView::new().on_submit({
-            // TODO: cloning?
-            let tx = network_tx.clone();
-            move |siv, name: &str| {
-                tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
-                    .unwrap();
-                start_interface(siv, display_tx.clone())
-            }
-        }))
-        .title("Enter path to store files"),
-    );
+    // siv.add_layer(
+    //     Dialog::around(EditView::new().on_submit({
+    //         // TODO: cloning?
+    //         let tx = network_tx.clone();
+    //         move |siv, name: &str| {
+    //             tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
+    //                 .unwrap();
+    //             start_interface(siv, display_tx.clone())
+    //         }
+    //     }))
+    //     .title("Enter path to store files"),
+    // );
+
+    start_interface(&mut siv, display_tx.clone());
 
     let mut siv = siv.runner();
     while siv.is_running() {
