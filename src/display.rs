@@ -6,8 +6,8 @@ use cursive::{
     views::{Button, Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
     Cursive,
 };
-use pnet::datalink::NetworkInterface;
 use std::fs;
+use std::path::Path;
 use std::thread;
 
 enum DisplayCommand {
@@ -25,7 +25,6 @@ enum NetworkCommand {
 
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
-    // should assert len > 0 for no interfaces would not work
     let mut channel = Channel::new(interfaces[0].clone());
 
     loop {
@@ -60,9 +59,6 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
 
         channel.recv();
     }
-
-    // needs to set a channel -> define in networking
-    // send display updates and receive network updates
 }
 
 fn start_interface(siv: &mut Cursive, display_tx: Sender<DisplayCommand>) {
@@ -127,13 +123,18 @@ fn start_interface(siv: &mut Cursive, display_tx: Sender<DisplayCommand>) {
     );
 }
 
-fn change_path(siv: &mut Cursive, network_tx: Sender<NetworkCommand>) {
+fn change_path(siv: &mut Cursive, network_tx: &Sender<NetworkCommand>) {
     siv.add_layer(
         Dialog::around(EditView::new().on_submit({
             let tx = network_tx.clone();
             move |siv, name: &str| {
-                tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
-                    .unwrap();
+                // TODO: display error on invalid dir
+                if Path::new(&name).is_dir() {
+                    eprintln!("updating local path");
+                    tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
+                        .unwrap();
+                }
+
                 siv.pop_layer();
             }
         }))
@@ -151,29 +152,15 @@ pub fn run() {
     });
 
     let mut siv = cursive::default();
-    siv.set_autohide_menu(false);
-
-    siv.menubar().add_leaf("quit", |siv| siv.quit());
-    siv.menubar().add_leaf("path", {
-        let tx = network_tx.clone();
-        move |siv| change_path(siv, tx.clone())
-    });
     siv.load_toml(include_str!("../assets/theme.toml")).unwrap();
 
-    // TODO: possibly leave path as menu option and have instructions on boot?
-    // siv.add_layer(
-    //     Dialog::around(EditView::new().on_submit({
-    //         // TODO: cloning?
-    //         let tx = network_tx.clone();
-    //         move |siv, name: &str| {
-    //             tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
-    //                 .unwrap();
-    //             start_interface(siv, display_tx.clone())
-    //         }
-    //     }))
-    //     .title("Enter path to store files"),
-    // );
+    siv.menubar().add_leaf("quit", |siv| siv.quit());
+    siv.menubar().add_leaf("storage-path", {
+        let tx = network_tx.clone();
+        move |siv| change_path(siv, &tx)
+    });
 
+    siv.set_autohide_menu(false);
     start_interface(&mut siv, display_tx.clone());
 
     let mut siv = siv.runner();
@@ -183,14 +170,12 @@ pub fn run() {
             match command {
                 DisplayCommand::NewFile(file) => {
                     if !fs::exists(&file).unwrap() {
-                        eprintln!("file does not exist: {0}", file);
                         continue;
                     }
 
-                    // TODO: fix up clones here
                     let tx = network_tx.clone();
                     siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
-                        let available = Dialog::around(TextView::new(file.clone()))
+                        let available = Dialog::around(TextView::new(&file))
                             .button("download", move |s| {
                                 tx.send(NetworkCommand::SendFile(file.clone())).unwrap()
                             });
@@ -199,7 +184,6 @@ pub fn run() {
                     });
                 }
                 DisplayCommand::ChangeInterface(interface) => {
-                    eprintln!("sending change interface command");
                     network_tx
                         .send(NetworkCommand::ChangeInterface(interface.clone()))
                         .unwrap();
@@ -211,7 +195,7 @@ pub fn run() {
                 }
                 DisplayCommand::FetchFile(id) => {
                     // TODO: poll for existing file
-                    println!("id: {}", id);
+                    eprintln!("id: {}", id);
                 }
             }
         }

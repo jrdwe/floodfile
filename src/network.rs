@@ -68,6 +68,7 @@ impl Channel {
     }
 
     pub fn send_chunk(&mut self, file: &Vec<u8>) {
+        // TODO: include opcode, sequencenumber, totalchunks
         let data = [MSG_PREAMBLE, file].concat();
         assert!(data.len() as u8 <= u8::MAX);
 
