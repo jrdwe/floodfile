@@ -1,6 +1,5 @@
 use pnet::datalink::Channel::Ethernet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
-use pnet::packet::Packet;
 use pnet::{
     datalink::{DataLinkReceiver, DataLinkSender, NetworkInterface},
     util::MacAddr,
@@ -12,6 +11,49 @@ use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
 const MSG_PREAMBLE: &[u8] = b"file";
+type Key = [u8; 8];
+
+pub fn compute_key(name: String) -> Key {
+    let digest = md5::compute(name.into_bytes());
+    digest[..8].try_into().unwrap()
+}
+
+pub enum Packet {
+    Advertise(Key, String),
+    Download(Key),
+}
+
+impl Packet {
+    fn opcode(&self) -> u8 {
+        match self {
+            Packet::Advertise(_, _) => 1,
+            Packet::Download(_) => 2,
+        }
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        // turn into bytes for over the wire
+        match self {
+            Packet::Advertise(key, path) => [key, path.as_bytes()].concat(),
+            Packet::Download(key) => key.to_vec(),
+        }
+    }
+
+    fn deserialize(opcode: u8, data: &[u8]) -> Option<Self> {
+        match opcode {
+            1 => {
+                let key: Key = data[..8].try_into().unwrap();
+                let path: String = std::str::from_utf8(&data[8..]).unwrap().to_string();
+                Some(Packet::Advertise(key, path))
+            }
+            2 => {
+                let key: Key = data[..8].try_into().unwrap();
+                Some(Packet::Download(key))
+            }
+            _ => None,
+        }
+    }
+}
 
 pub fn usable_interfaces() -> Vec<NetworkInterface> {
     let mut interfaces = pnet::datalink::interfaces()
