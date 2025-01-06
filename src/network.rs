@@ -1,9 +1,11 @@
 use pnet::datalink::Channel::Ethernet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
+use pnet::packet::Packet;
 use pnet::{
     datalink::{DataLinkReceiver, DataLinkSender, NetworkInterface},
     util::MacAddr,
 };
+use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
@@ -18,37 +20,44 @@ pub fn compute_key(name: String) -> Key {
     digest[..8].try_into().unwrap()
 }
 
-pub enum Packet {
+pub enum Payload {
+    Data(Key, &[u8]),
     Advertise(Key, String),
     Download(Key),
 }
 
-impl Packet {
+impl Payload {
     fn opcode(&self) -> u8 {
         match self {
-            Packet::Advertise(_, _) => 1,
-            Packet::Download(_) => 2,
+            Payload::Data(_, _) => 0,
+            Payload::Advertise(_, _) => 1,
+            Payload::Download(_) => 2,
         }
     }
 
     fn serialize(&self) -> Vec<u8> {
         // turn into bytes for over the wire
         match self {
-            Packet::Advertise(key, path) => [key, path.as_bytes()].concat(),
-            Packet::Download(key) => key.to_vec(),
+            Payload::Data(key, data) => [key, data].concat(),
+            Payload::Advertise(key, path) => [key, path.as_bytes()].concat(),
+            Payload::Download(key) => key.to_vec(),
         }
     }
 
-    fn deserialize(opcode: u8, data: &[u8]) -> Option<Self> {
+    fn deserialize(opcode: u8, data: &[u8]) -> Option<Payload> {
         match opcode {
+            0 => {
+                let key: Key = data[..8].try_into().unwrap();
+                Some(Payload::Data(key, data[8..].try_into().unwrap()))
+            }
             1 => {
                 let key: Key = data[..8].try_into().unwrap();
                 let path: String = std::str::from_utf8(&data[8..]).unwrap().to_string();
-                Some(Packet::Advertise(key, path))
+                Some(Payload::Advertise(key, path))
             }
             2 => {
                 let key: Key = data[..8].try_into().unwrap();
-                Some(Packet::Download(key))
+                Some(Payload::Download(key))
             }
             _ => None,
         }
@@ -73,6 +82,7 @@ pub struct Channel {
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
     rx: Box<dyn DataLinkReceiver>,
+    sharing: HashMap<Key, String>,
 }
 
 impl Channel {
@@ -92,6 +102,7 @@ impl Channel {
             interface,
             tx,
             rx,
+            sharing: HashMap::new(),
         }
     }
 
@@ -105,6 +116,8 @@ impl Channel {
 
     pub fn send(&mut self, file_name: String) {
         // TODO: chunk out and send the file via send_chunk
+        // TODO: append information on advertising to sharing
+
         let file_content: Vec<u8> = fs::read(&file_name).unwrap();
         self.send_chunk(&file_content);
     }
@@ -160,6 +173,7 @@ impl Channel {
         let chunk_len = packet.payload()[5] as usize;
 
         // TODO: store file name somewhere and save using that
+        // NOTE: Payload::Data(_, _) will now hold entire file in memory?
         let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
         file.write_all(&packet.payload()[18..(18 + chunk_len)])
             .unwrap();
