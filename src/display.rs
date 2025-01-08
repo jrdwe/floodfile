@@ -31,11 +31,12 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
         while let Ok(command) = network_rx.try_recv() {
             match command {
                 NetworkCommand::AdvertiseFile(filepath) => {
+                    // TODO: append information on advertising to sharing
                     println!("filepath: {}", filepath);
                 }
                 NetworkCommand::SendFile(file) => {
-                    // TODO: fix this up after test - sends a small file
-                    channel.send(file);
+                    // TODO: sends a small file
+                    // channel.send(file);
                 }
                 NetworkCommand::ChangeInterface(name) => {
                     if channel.interface_name() == name {
