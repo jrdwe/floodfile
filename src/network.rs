@@ -5,6 +5,7 @@ use pnet::{
     datalink::{DataLinkReceiver, DataLinkSender, NetworkInterface},
     util::MacAddr,
 };
+use rand::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -12,57 +13,56 @@ use std::io::prelude::*;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
+const CHUNK_SIZE: usize = u8::MAX as usize - MSG_PREAMBLE.len() + 3 + 8;
 const MSG_PREAMBLE: &[u8] = b"file";
 
 type Key = [u8; 8];
-type FileHash = [u8; 8];
+type FileHash = [u8; 16];
 
 pub fn compute_filehash(name: String) -> FileHash {
     let digest = md5::compute(name.into_bytes());
-    digest[..8].try_into().unwrap()
+    digest.try_into().unwrap()
 }
 
 pub enum Payload {
-    Data(Key, FileHash, Vec<u8>),
-    Advertise(Key, String),
-    Download(Key, FileHash),
+    File(FileHash, Vec<u8>),
+    Advertise(String),
+    Download(FileHash),
 }
 
 impl Payload {
     fn opcode(&self) -> u8 {
         match self {
-            Payload::Data(_, _, _) => 0,
-            Payload::Advertise(_, _) => 1,
-            Payload::Download(_, _) => 2,
+            Payload::File(_, _) => 0,
+            Payload::Advertise(_) => 1,
+            Payload::Download(_) => 2,
         }
     }
 
     fn serialize(&self) -> Vec<u8> {
         // turn into bytes for over the wire
         match self {
-            Payload::Data(key, filehash, data) => [&key[..], &filehash[..], data].concat(),
-            Payload::Advertise(key, path) => [key, path.as_bytes()].concat(),
-            Payload::Download(key, filehash) => [&key[..], &filehash[..]].concat(),
+            Payload::File(filehash, data) => [&filehash[..], data].concat(),
+            Payload::Advertise(path) => path.as_bytes().to_vec(),
+            Payload::Download(filehash) => filehash.to_vec(),
         }
     }
 
     fn deserialize(opcode: u8, data: &[u8]) -> Option<Payload> {
         match opcode {
             0 => {
-                let key: Key = data[..8].try_into().unwrap();
-                let hash: FileHash = data[8..16].try_into().unwrap();
-                let info = data[16..].try_into().unwrap();
-                Some(Payload::Data(key, hash, info))
+                let hash: FileHash = data[0..16].try_into().unwrap();
+                let file = data[16..].try_into().unwrap();
+                Some(Payload::File(hash, file))
             }
             1 => {
-                let key: Key = data[..8].try_into().unwrap();
+                // let key: Key = data[..8].try_into().unwrap();
                 let path: String = std::str::from_utf8(&data[8..]).unwrap().to_string();
-                Some(Payload::Advertise(key, path))
+                Some(Payload::Advertise(path))
             }
             2 => {
-                let key: Key = data[..8].try_into().unwrap();
-                let hash: FileHash = data[8..16].try_into().unwrap();
-                Some(Payload::Download(key, hash))
+                let hash: FileHash = data[..16].try_into().unwrap();
+                Some(Payload::Download(hash))
             }
             _ => None,
         }
@@ -120,21 +120,25 @@ impl Channel {
     }
 
     pub fn send(&mut self, packet: Payload) {
-        // TODO: chunk out and send the file via send_chunk
-
         // 1. serialise packet
-        // 2. chunk packet into reasonable size
-        // > [[opcode], [id; 8], [total], [offset], [data]]
-        // 3. send chunks over wire!
+        let data = packet.serialize();
 
-        // a random id for each payload?
-        // let file_content: Vec<u8> = fs::read(&file_name).unwrap();
-        // self.send_chunk(&file_content);
+        // 2. chunk packet into reasonable size
+        let chunks: Vec<&[u8]> = data.chunks(CHUNK_SIZE).collect();
+
+        // 3. [[opcode], [total], [offset], [payload specific data]]
+        let opcode = packet.opcode();
+        let total = chunks.len() - 1;
+        let key: Key = rand::thread_rng().gen();
+
+        // 4. send chunks over wire!
+        for (offset, chunk) in chunks.iter().enumerate() {
+            self.send_chunk(opcode, offset as u8, total as u8, key, chunk);
+        }
     }
 
-    pub fn send_chunk(&mut self, file: &Vec<u8>) {
-        // TODO: include opcode, sequencenumber, totalchunks
-        let data = [MSG_PREAMBLE, file].concat();
+    pub fn send_chunk(&mut self, op: u8, offset: u8, total: u8, key: Key, data: &[u8]) {
+        let data = [MSG_PREAMBLE, &[op, offset, total], &key[..], data].concat();
         assert!(data.len() as u8 <= u8::MAX);
 
         let arp_packet = [
@@ -157,8 +161,6 @@ impl Channel {
         ethernet_packet.set_ethertype(EtherTypes::Arp);
         ethernet_packet.set_payload(&arp_packet);
 
-        eprintln!("sending packet");
-        eprintln!("file: {:?}", file);
         self.tx
             .send_to(ethernet_packet.packet(), None)
             .unwrap()

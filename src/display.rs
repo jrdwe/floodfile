@@ -1,4 +1,4 @@
-use crate::network::{usable_interfaces, Channel};
+use crate::network::{compute_filehash, usable_interfaces, Channel, Payload};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use cursive::{
     traits::{Nameable, Resizable, Scrollable},
@@ -35,8 +35,11 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                     println!("filepath: {}", filepath);
                 }
                 NetworkCommand::SendFile(file) => {
-                    // TODO: sends a small file
-                    // channel.send(file);
+                    // TODO: move the file reading elsewhere
+                    let data: Vec<u8> = fs::read(&file).unwrap();
+                    let hash = compute_filehash(file.clone());
+
+                    channel.send(Payload::File(hash, data));
                 }
                 NetworkCommand::ChangeInterface(name) => {
                     if channel.interface_name() == name {
