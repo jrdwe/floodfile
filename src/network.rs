@@ -7,9 +7,9 @@ use pnet::{
 };
 use rand::prelude::*;
 use std::collections::HashMap;
-use std::fs;
-use std::fs::File;
-use std::io::prelude::*;
+// use std::fs;
+// use std::fs::File;
+// use std::io::prelude::*;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
@@ -88,6 +88,7 @@ pub struct Channel {
     tx: Box<dyn DataLinkSender>,
     rx: Box<dyn DataLinkReceiver>,
     sharing: HashMap<FileHash, String>,
+    packets: HashMap<Key, Vec<Vec<u8>>>,
 }
 
 impl Channel {
@@ -108,6 +109,7 @@ impl Channel {
             tx,
             rx,
             sharing: HashMap::new(),
+            packets: HashMap::new(),
         }
     }
 
@@ -128,7 +130,7 @@ impl Channel {
 
         // 3. [[opcode], [total], [offset], [payload specific data]]
         let opcode = packet.opcode();
-        let total = chunks.len() - 1;
+        let total = chunks.len();
         let key: Key = rand::thread_rng().gen();
 
         // 4. store advertising filename
@@ -173,27 +175,46 @@ impl Channel {
             .unwrap();
     }
 
-    pub fn recv(&mut self) {
+    pub fn recv(&mut self) -> Option<Payload> {
         let packet = match self.rx.next() {
             Ok(packet) => packet,
-            Err(_) => return,
+            Err(_) => return None,
         };
 
         let packet = EthernetPacket::new(packet).unwrap();
+
+        // check for early exit conditions
         if packet.get_ethertype() != EtherTypes::Arp || packet.payload()[7] != 1 {
-            return;
+            return None;
         }
-
         if &packet.payload()[14..18] != MSG_PREAMBLE {
-            return;
+            return None;
         }
 
-        let chunk_len = packet.payload()[5] as usize;
+        let data_len = packet.payload()[5] as usize;
+        let data = &packet.payload()[18..(18 + data_len)];
 
-        // TODO: store file name somewhere and save using that
-        // NOTE: Payload::Data(_, _) will now hold entire file in memory?
-        let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
-        file.write_all(&packet.payload()[18..(18 + chunk_len)])
-            .unwrap();
+        let opcode = data[0];
+        let offset = data[1] as usize;
+        let total = data[2] as usize;
+        let key: Key = data[3..11].try_into().unwrap();
+
+        // 1. check if we've seen the id - allocate vec with total size
+        let packet = self.packets.entry(key).or_insert(vec![vec![]; total]);
+
+        // 2. store portion if we haven't already (does this shit duplicate?)
+        if packet[offset].is_empty() {
+            packet[offset] = data[11..].to_vec();
+        }
+
+        // 3. check if we've a full payload
+        let collected: bool = packet.iter().all(|x| !x.is_empty());
+        if collected {
+            // 3.1 deserialize if so and return it.
+            eprintln!("{:?}", packet);
+        }
+
+        // eprintln!("op: {0} total: {1} offset: {2}", opcode, total, offset);
+        None
     }
 }

@@ -37,7 +37,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                 NetworkCommand::SendFile(file) => {
                     // TODO: move the file reading elsewhere
                     let data: Vec<u8> = fs::read(&file).unwrap();
-                    let hash = compute_filehash(&file));
+                    let hash = compute_filehash(&file);
 
                     channel.send(Payload::File(hash, data));
                 }
@@ -62,6 +62,15 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
         }
 
         channel.recv();
+
+        // TODO: store file name somewhere and save
+
+        // let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
+        // file.write_all(&packet.payload()[18..(18 + chunk_len)])
+        //     .unwrap();
+
+        // TODO: if you get a download req + it's in your hashmap. share out.
+        // TODO: function to check if it's something we advertise? how do we find that
     }
 }
 
