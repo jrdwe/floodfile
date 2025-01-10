@@ -19,8 +19,8 @@ const MSG_PREAMBLE: &[u8] = b"file";
 type Key = [u8; 8];
 type FileHash = [u8; 16];
 
-pub fn compute_filehash(name: String) -> FileHash {
-    let digest = md5::compute(name.into_bytes());
+pub fn compute_filehash(name: &String) -> FileHash {
+    let digest = md5::compute(name.clone().into_bytes());
     digest.try_into().unwrap()
 }
 
@@ -87,7 +87,7 @@ pub struct Channel {
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
     rx: Box<dyn DataLinkReceiver>,
-    sharing: HashMap<Key, String>,
+    sharing: HashMap<FileHash, String>,
 }
 
 impl Channel {
@@ -131,7 +131,13 @@ impl Channel {
         let total = chunks.len() - 1;
         let key: Key = rand::thread_rng().gen();
 
-        // 4. send chunks over wire!
+        // 4. store advertising filename
+        if let Payload::Advertise(filename) = packet {
+            let hash = compute_filehash(&filename);
+            self.sharing.insert(hash, filename.clone());
+        }
+
+        // 5. send chunks over wire!
         for (offset, chunk) in chunks.iter().enumerate() {
             self.send_chunk(opcode, offset as u8, total as u8, key, chunk);
         }

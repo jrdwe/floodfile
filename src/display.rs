@@ -37,7 +37,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                 NetworkCommand::SendFile(file) => {
                     // TODO: move the file reading elsewhere
                     let data: Vec<u8> = fs::read(&file).unwrap();
-                    let hash = compute_filehash(file.clone());
+                    let hash = compute_filehash(&file));
 
                     channel.send(Payload::File(hash, data));
                 }
