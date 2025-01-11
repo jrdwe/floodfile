@@ -14,14 +14,13 @@ use std::thread;
 enum DisplayCommand {
     AdvertiseFile(String),
     NewFile(String),
-    FetchFile(String),
     ChangeInterface(String),
 }
 
 enum NetworkCommand {
     UpdateLocalPath(String),
     AdvertiseFile(String),
-    SendFile(String),
+    RequestFile(String),
     ChangeInterface(String),
 }
 
@@ -36,7 +35,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                 NetworkCommand::AdvertiseFile(filepath) => {
                     channel.send(Payload::Advertise(filepath));
                 }
-                NetworkCommand::SendFile(file) => {
+                NetworkCommand::RequestFile(file) => {
                     // TODO: move the file reading elsewhere
                     let data: Vec<u8> = fs::read(&file).unwrap();
                     let hash = compute_filehash(&file);
@@ -75,10 +74,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                     filenames.insert(hash, filepath.clone());
                     display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
                 }
-                Payload::Download(filehash) => {
-                    // TODO: send request for file
-                    eprintln!("DOWNLOAD")
-                }
+                Payload::Download(_) => {} // already handled
             }
         }
     }
@@ -204,7 +200,7 @@ pub fn run() {
                     siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
                         let available = Dialog::around(TextView::new(&file))
                             .button("download", move |s| {
-                                tx.send(NetworkCommand::SendFile(file.clone())).unwrap()
+                                tx.send(NetworkCommand::RequestFile(file.clone())).unwrap()
                             });
 
                         file_list.add_child(available);
@@ -219,10 +215,6 @@ pub fn run() {
                     siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
                         file_list.clear();
                     });
-                }
-                DisplayCommand::FetchFile(id) => {
-                    // TODO: poll for existing file
-                    eprintln!("id: {}", id);
                 }
             }
         }

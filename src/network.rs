@@ -218,6 +218,8 @@ impl Channel {
         let packet = Payload::deserialize(opcode, &packet[..].concat());
         self.packets.remove(&key);
 
+        // TODO: maybe check if request for file we advertise right here..
+
         packet
     }
 }
