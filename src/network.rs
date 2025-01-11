@@ -7,9 +7,6 @@ use pnet::{
 };
 use rand::prelude::*;
 use std::collections::HashMap;
-// use std::fs;
-// use std::fs::File;
-// use std::io::prelude::*;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
@@ -41,7 +38,6 @@ impl Payload {
     }
 
     fn serialize(&self) -> Vec<u8> {
-        // turn into bytes for over the wire
         match self {
             Payload::File(filehash, data) => [&filehash[..], data].concat(),
             Payload::Advertise(path) => path.as_bytes().to_vec(),
@@ -57,8 +53,7 @@ impl Payload {
                 Some(Payload::File(hash, file))
             }
             1 => {
-                // let key: Key = data[..8].try_into().unwrap();
-                let path: String = std::str::from_utf8(&data[8..]).unwrap().to_string();
+                let path: String = std::str::from_utf8(&data[..]).unwrap().to_string();
                 Some(Payload::Advertise(path))
             }
             2 => {
@@ -97,6 +92,7 @@ impl Channel {
         let mut config = pnet::datalink::Config::default();
         config.read_timeout = Some(Duration::from_millis(1000));
 
+        // TODO: remove panic statements
         let (tx, rx) = match pnet::datalink::channel(&interface, config) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             Ok(_) => panic!("Unhandled channel type"),
@@ -192,10 +188,10 @@ impl Channel {
             return None;
         }
 
-        let data_len = packet.payload()[5] as usize;
+        let data_len = packet.payload()[5] as usize - MSG_PREAMBLE.len();
         let data = &packet.payload()[18..(18 + data_len)];
 
-        let opcode = data[0]; // why not include this into the payload?
+        let opcode = data[0];
         let offset = data[1] as usize;
         let total = data[2] as usize;
         let key: Key = data[3..11].try_into().unwrap();
