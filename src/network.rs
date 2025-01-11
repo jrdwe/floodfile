@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
-const CHUNK_SIZE: usize = u8::MAX as usize - MSG_PREAMBLE.len() + 3 + 8;
 const MSG_PREAMBLE: &[u8] = b"file";
+const CHUNK_SIZE: usize = u8::MAX as usize - (MSG_PREAMBLE.len() + 3 + 8);
 
 type Key = [u8; 8];
 type FileHash = [u8; 16];
@@ -147,7 +147,7 @@ impl Channel {
 
     pub fn send_chunk(&mut self, op: u8, offset: u8, total: u8, key: Key, data: &[u8]) {
         let data = [MSG_PREAMBLE, &[op, offset, total], &key[..], data].concat();
-        assert!(data.len() as u8 <= u8::MAX);
+        assert!(data.len() <= u8::MAX as usize);
 
         let arp_packet = [
             &[0, 1],                     // hardware type
@@ -194,7 +194,7 @@ impl Channel {
         let data_len = packet.payload()[5] as usize;
         let data = &packet.payload()[18..(18 + data_len)];
 
-        let opcode = data[0];
+        let opcode = data[0]; // why not include this into the payload?
         let offset = data[1] as usize;
         let total = data[2] as usize;
         let key: Key = data[3..11].try_into().unwrap();
@@ -210,7 +210,7 @@ impl Channel {
         // 3. check if we've a full payload
         let collected: bool = packet.iter().all(|x| !x.is_empty());
         if collected {
-            // 3.1 deserialize if so and return it.
+            // 3.1 deserialize if so and return + remove from buffer
             eprintln!("{:?}", packet);
         }
 
