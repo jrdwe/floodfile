@@ -1,4 +1,4 @@
-use crate::network::{compute_filehash, usable_interfaces, Channel, Payload};
+use crate::network::{compute_filehash, usable_interfaces, Channel, FileHash, Payload};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use cursive::{
     traits::{Nameable, Resizable, Scrollable},
@@ -6,11 +6,13 @@ use cursive::{
     views::{Button, Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
     Cursive,
 };
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::thread;
 
 enum DisplayCommand {
+    AdvertiseFile(String),
     NewFile(String),
     FetchFile(String),
     ChangeInterface(String),
@@ -25,14 +27,14 @@ enum NetworkCommand {
 
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
+    let mut filenames: HashMap<FileHash, String> = HashMap::new();
     let mut channel = Channel::new(interfaces[0].clone());
 
     loop {
         while let Ok(command) = network_rx.try_recv() {
             match command {
                 NetworkCommand::AdvertiseFile(filepath) => {
-                    // TODO: append information on advertising to sharing
-                    println!("filepath: {}", filepath);
+                    channel.send(Payload::Advertise(filepath));
                 }
                 NetworkCommand::SendFile(file) => {
                     // TODO: move the file reading elsewhere
@@ -51,26 +53,34 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                         .find(|i| i.name == name)
                         .unwrap();
 
-                    eprintln!("changed interface: {}", interface.name);
                     channel = Channel::new(interface);
                 }
                 NetworkCommand::UpdateLocalPath(path) => {
-                    // TODO: check it's valid
                     channel.set_path(&path);
                 }
             }
         }
 
-        channel.recv();
-
-        // TODO: store file name somewhere and save
-
-        // let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
-        // file.write_all(&packet.payload()[18..(18 + chunk_len)])
-        //     .unwrap();
-
-        // TODO: if you get a download req + it's in your hashmap. share out.
-        // TODO: function to check if it's something we advertise? how do we find that
+        let packet = channel.recv();
+        if let Some(packet) = packet {
+            match packet {
+                Payload::File(filehash, data) => {
+                    // let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
+                    // file.write_all(&packet.payload()[18..(18 + chunk_len)])
+                    //     .unwrap();
+                    eprintln!("FILE")
+                }
+                Payload::Advertise(filepath) => {
+                    let hash = compute_filehash(&filepath);
+                    filenames.insert(hash, filepath.clone());
+                    display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
+                }
+                Payload::Download(filehash) => {
+                    // TODO: send request for file
+                    eprintln!("DOWNLOAD")
+                }
+            }
+        }
     }
 }
 
@@ -91,7 +101,7 @@ fn start_interface(siv: &mut Cursive, display_tx: Sender<DisplayCommand>) {
                                                 |field: &mut EditView| field.set_content(""),
                                             );
 
-                                            tx.send(DisplayCommand::NewFile(name.to_string()))
+                                            tx.send(DisplayCommand::AdvertiseFile(name.to_string()))
                                                 .unwrap()
                                         }
                                     })
@@ -143,7 +153,6 @@ fn change_path(siv: &mut Cursive, network_tx: &Sender<NetworkCommand>) {
             move |siv, name: &str| {
                 // TODO: display error on invalid dir
                 if Path::new(&name).is_dir() {
-                    eprintln!("updating local path");
                     tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
                         .unwrap();
                 }
@@ -181,11 +190,16 @@ pub fn run() {
         siv.refresh();
         while let Ok(command) = display_rx.try_recv() {
             match command {
-                DisplayCommand::NewFile(file) => {
+                DisplayCommand::AdvertiseFile(file) => {
                     if !fs::exists(&file).unwrap() {
                         continue;
                     }
 
+                    network_tx
+                        .send(NetworkCommand::AdvertiseFile(file.clone()))
+                        .unwrap();
+                }
+                DisplayCommand::NewFile(file) => {
                     let tx = network_tx.clone();
                     siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
                         let available = Dialog::around(TextView::new(&file))

@@ -16,14 +16,15 @@ const ETHERNET_HEADER_SIZE: usize = 14;
 const MSG_PREAMBLE: &[u8] = b"file";
 const CHUNK_SIZE: usize = u8::MAX as usize - (MSG_PREAMBLE.len() + 3 + 8);
 
-type Key = [u8; 8];
-type FileHash = [u8; 16];
+pub type Key = [u8; 8];
+pub type FileHash = [u8; 16];
 
 pub fn compute_filehash(name: &String) -> FileHash {
     let digest = md5::compute(name.clone().into_bytes());
     digest.try_into().unwrap()
 }
 
+#[derive(Debug)]
 pub enum Payload {
     File(FileHash, Vec<u8>),
     Advertise(String),
@@ -202,19 +203,21 @@ impl Channel {
         // 1. check if we've seen the id - allocate vec with total size
         let packet = self.packets.entry(key).or_insert(vec![vec![]; total]);
 
-        // 2. store portion if we haven't already (does this shit duplicate?)
+        // 2. store portion if we haven't already
         if packet[offset].is_empty() {
             packet[offset] = data[11..].to_vec();
         }
 
         // 3. check if we've a full payload
         let collected: bool = packet.iter().all(|x| !x.is_empty());
-        if collected {
-            // 3.1 deserialize if so and return + remove from buffer
-            eprintln!("{:?}", packet);
+        if !collected {
+            return None;
         }
 
-        // eprintln!("op: {0} total: {1} offset: {2}", opcode, total, offset);
-        None
+        // 4. deserialize
+        let packet = Payload::deserialize(opcode, &packet[..].concat());
+        self.packets.remove(&key);
+
+        packet
     }
 }
