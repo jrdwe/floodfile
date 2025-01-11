@@ -29,7 +29,7 @@ enum NetworkCommand {
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
     let mut channel = Channel::new(interfaces[0].clone());
-    let mut shared: HashMap<FileHash, String> = HashMap::new(); // probably rename
+    let mut shared: HashMap<FileHash, String> = HashMap::new();
     let mut sharing: HashMap<FileHash, String> = HashMap::new();
 
     loop {
@@ -56,7 +56,11 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
 
                     channel = Channel::new(interface);
                 }
-                NetworkCommand::UpdateLocalPath(path) => {
+                NetworkCommand::UpdateLocalPath(mut path) => {
+                    if path.chars().last().unwrap() != '/' {
+                        path = path.clone() + "/";
+                    }
+
                     channel.set_path(&path);
                 }
             }
@@ -207,7 +211,7 @@ pub fn run() {
                     let tx = network_tx.clone();
                     siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
                         let available = Dialog::around(TextView::new(&file))
-                            .button("download", move |s| {
+                            .button("download", move |_s| {
                                 tx.send(NetworkCommand::RequestFile(file.clone())).unwrap()
                             });
 
@@ -219,7 +223,7 @@ pub fn run() {
                         .send(NetworkCommand::ChangeInterface(interface.clone()))
                         .unwrap();
 
-                    // TODO: only if successful? need error handling here
+                    // TODO: only if successful - need error handling here
                     siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
                         file_list.clear();
                     });
