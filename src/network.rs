@@ -83,7 +83,6 @@ pub struct Channel {
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
     rx: Box<dyn DataLinkReceiver>,
-    sharing: HashMap<FileHash, String>,
     packets: HashMap<Key, Vec<Vec<u8>>>,
 }
 
@@ -105,7 +104,6 @@ impl Channel {
             interface,
             tx,
             rx,
-            sharing: HashMap::new(),
             packets: HashMap::new(),
         }
     }
@@ -116,6 +114,10 @@ impl Channel {
 
     pub fn set_path(&mut self, path: &String) {
         self.local_path = path.clone();
+    }
+
+    pub fn get_path(&self) -> String {
+        self.local_path.clone()
     }
 
     pub fn send(&mut self, packet: Payload) {
@@ -130,13 +132,7 @@ impl Channel {
         let total = chunks.len();
         let key: Key = rand::thread_rng().gen();
 
-        // 4. store advertising filename
-        if let Payload::Advertise(filename) = packet {
-            let hash = compute_filehash(&filename);
-            self.sharing.insert(hash, filename.clone());
-        }
-
-        // 5. send chunks over wire!
+        // 4. send chunks over wire!
         for (offset, chunk) in chunks.iter().enumerate() {
             self.send_chunk(opcode, offset as u8, total as u8, key, chunk);
         }
@@ -213,8 +209,6 @@ impl Channel {
         // 4. deserialize
         let packet = Payload::deserialize(opcode, &packet[..].concat());
         self.packets.remove(&key);
-
-        // TODO: maybe check if request for file we advertise right here..
 
         packet
     }

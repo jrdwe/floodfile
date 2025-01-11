@@ -3,11 +3,13 @@ use crossbeam::channel::{unbounded, Receiver, Sender};
 use cursive::{
     traits::{Nameable, Resizable, Scrollable},
     view::ScrollStrategy,
-    views::{Button, Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
+    views::{Dialog, EditView, LinearLayout, Panel, SelectView, TextView},
     Cursive,
 };
 use std::collections::HashMap;
 use std::fs;
+use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
 use std::thread;
 
@@ -26,21 +28,21 @@ enum NetworkCommand {
 
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
-    let mut filenames: HashMap<FileHash, String> = HashMap::new();
     let mut channel = Channel::new(interfaces[0].clone());
+    let mut shared: HashMap<FileHash, String> = HashMap::new(); // probably rename
+    let mut sharing: HashMap<FileHash, String> = HashMap::new();
 
     loop {
         while let Ok(command) = network_rx.try_recv() {
             match command {
                 NetworkCommand::AdvertiseFile(filepath) => {
+                    let hash = compute_filehash(&filepath);
+                    sharing.insert(hash, filepath.clone());
                     channel.send(Payload::Advertise(filepath));
                 }
                 NetworkCommand::RequestFile(file) => {
-                    // TODO: move the file reading elsewhere
-                    let data: Vec<u8> = fs::read(&file).unwrap();
                     let hash = compute_filehash(&file);
-
-                    channel.send(Payload::File(hash, data));
+                    channel.send(Payload::Download(hash));
                 }
                 NetworkCommand::ChangeInterface(name) => {
                     if channel.interface_name() == name {
@@ -64,17 +66,23 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
         if let Some(packet) = packet {
             match packet {
                 Payload::File(filehash, data) => {
-                    // let mut file = File::create(self.local_path.clone() + "output_floodfile").unwrap();
-                    // file.write_all(&packet.payload()[18..(18 + chunk_len)])
-                    //     .unwrap();
-                    eprintln!("FILE")
+                    if let Some(filename) = shared.get(&filehash) {
+                        let filename = filename.split("/").last().unwrap();
+                        let mut file = File::create(channel.get_path() + filename).unwrap();
+                        file.write_all(&data).unwrap();
+                    }
                 }
                 Payload::Advertise(filepath) => {
                     let hash = compute_filehash(&filepath);
-                    filenames.insert(hash, filepath.clone());
+                    shared.insert(hash, filepath.clone());
                     display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
                 }
-                Payload::Download(_) => {} // already handled
+                Payload::Download(hash) => {
+                    if let Some(file) = sharing.get(&hash) {
+                        let data: Vec<u8> = fs::read(&file).unwrap();
+                        channel.send(Payload::File(hash, data));
+                    }
+                }
             }
         }
     }
