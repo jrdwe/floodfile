@@ -1,3 +1,4 @@
+use lz4_flex::block::{compress_prepend_size, decompress_size_prepended};
 use pnet::datalink::Channel::Ethernet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::Packet;
@@ -39,7 +40,10 @@ impl Payload {
 
     fn serialize(&self) -> Vec<u8> {
         match self {
-            Payload::File(filehash, data) => [&filehash[..], data].concat(),
+            Payload::File(filehash, data) => {
+                let data = compress_prepend_size(data);
+                [&filehash[..], &data[..]].concat()
+            }
             Payload::Advertise(path) => path.as_bytes().to_vec(),
             Payload::Download(filehash) => filehash.to_vec(),
         }
@@ -49,7 +53,8 @@ impl Payload {
         match opcode {
             0 => {
                 let hash: FileHash = data[0..16].try_into().unwrap();
-                let file = data[16..].try_into().unwrap();
+                let file_compressed = data[16..].try_into().unwrap();
+                let file = decompress_size_prepended(file_compressed).unwrap();
                 Some(Payload::File(hash, file))
             }
             1 => {
