@@ -8,11 +8,14 @@ use pnet::{
 };
 use rand::prelude::*;
 use std::collections::HashMap;
+use std::thread;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
+// preamble + [opcode(1), total (2), offset (2)] + [key (8)]
+const FLOODFILE_HEADER_SIZE: usize = MSG_PREAMBLE.len() + 5 + 8;
 const MSG_PREAMBLE: &[u8] = b"file";
-const CHUNK_SIZE: usize = u8::MAX as usize - (MSG_PREAMBLE.len() + 3 + 8);
+const CHUNK_SIZE: usize = u8::MAX as usize - FLOODFILE_HEADER_SIZE;
 
 pub type Key = [u8; 8];
 pub type FileHash = [u8; 16];
@@ -42,6 +45,7 @@ impl Payload {
         match self {
             Payload::File(filehash, data) => {
                 let data = compress_prepend_size(data);
+                eprintln!("sending len: {0}", data.len());
                 [&filehash[..], &data[..]].concat()
             }
             Payload::Advertise(path) => path.as_bytes().to_vec(),
@@ -137,14 +141,28 @@ impl Channel {
         let total = chunks.len();
         let key: Key = rand::thread_rng().gen();
 
+        assert!(total <= u16::MAX as usize);
+
         // 4. send chunks over wire!
         for (offset, chunk) in chunks.iter().enumerate() {
-            self.send_chunk(opcode, offset as u8, total as u8, key, chunk);
+            self.send_chunk(opcode, offset as u16, total as u16, key, chunk);
         }
     }
 
-    pub fn send_chunk(&mut self, op: u8, offset: u8, total: u8, key: Key, data: &[u8]) {
-        let data = [MSG_PREAMBLE, &[op, offset, total], &key[..], data].concat();
+    pub fn send_chunk(&mut self, op: u8, offset: u16, total: u16, key: Key, data: &[u8]) {
+        // TODO: fixes issue with large file transfers. unideal solution.
+        thread::sleep(Duration::from_micros(1_000));
+
+        let data = [
+            MSG_PREAMBLE,
+            &[op],
+            &offset.to_le_bytes()[..],
+            &total.to_le_bytes()[..],
+            &key[..],
+            data,
+        ]
+        .concat();
+
         assert!(data.len() <= u8::MAX as usize);
 
         let arp_packet = [
@@ -193,16 +211,16 @@ impl Channel {
         let data = &packet.payload()[18..(18 + data_len)];
 
         let opcode = data[0];
-        let offset = data[1] as usize;
-        let total = data[2] as usize;
-        let key: Key = data[3..11].try_into().unwrap();
+        let offset = u16::from_le_bytes([data[1], data[2]]) as usize;
+        let total = u16::from_le_bytes([data[3], data[4]]) as usize;
+        let key: Key = data[5..13].try_into().unwrap();
 
-        // 1. check if we've seen the id - allocate vec with total size
+        // 1. allocate vec with total size
         let packet = self.packets.entry(key).or_insert(vec![vec![]; total]);
 
         // 2. store portion if we haven't already
         if packet[offset].is_empty() {
-            packet[offset] = data[11..].to_vec();
+            packet[offset] = data[13..].to_vec();
         }
 
         // 3. check if we've a full payload
