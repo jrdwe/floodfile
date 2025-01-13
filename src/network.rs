@@ -1,3 +1,4 @@
+use crossbeam::channel::{unbounded, Receiver, Sender};
 use lz4_flex::block::{compress_prepend_size, decompress_size_prepended};
 use pnet::datalink::Channel::Ethernet;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
@@ -8,11 +9,12 @@ use pnet::{
 };
 use rand::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
-// preamble + [opcode(1), total (2), offset (2)] + [key (8)]
+// [preamble (4)] + [opcode(1), total (2), offset (2)] + [key (8)]
 const FLOODFILE_HEADER_SIZE: usize = MSG_PREAMBLE.len() + 5 + 8;
 const MSG_PREAMBLE: &[u8] = b"file";
 const CHUNK_SIZE: usize = u8::MAX as usize - FLOODFILE_HEADER_SIZE;
@@ -91,7 +93,7 @@ pub struct Channel {
     local_path: String,
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
-    rx: Box<dyn DataLinkReceiver>,
+    buffer_rx: Receiver<Arc<[u8]>>,
     packets: HashMap<Key, Vec<Vec<u8>>>,
 }
 
@@ -107,12 +109,15 @@ impl Channel {
             Err(e) => panic!("Error occurred fetching channel: {}", e),
         };
 
+        let (buffer_tx, buffer_rx) = unbounded::<Arc<[u8]>>();
+        thread::spawn(move || Self::listener(rx, buffer_tx));
+
         Self {
             src_mac_addr: interface.mac.unwrap(),
             local_path: String::from("/tmp/"),
             interface,
             tx,
-            rx,
+            buffer_rx,
             packets: HashMap::new(),
         }
     }
@@ -150,9 +155,6 @@ impl Channel {
     }
 
     pub fn send_chunk(&mut self, op: u8, offset: u16, total: u16, key: Key, data: &[u8]) {
-        // TODO: fixes issue with large file transfers. unideal solution.
-        thread::sleep(Duration::from_micros(1_000));
-
         let data = [
             MSG_PREAMBLE,
             &[op],
@@ -192,14 +194,13 @@ impl Channel {
     }
 
     pub fn recv(&mut self) -> Option<Payload> {
-        let packet = match self.rx.next() {
-            Ok(packet) => packet,
+        let data = match self.buffer_rx.try_recv() {
+            Ok(data) => data,
             Err(_) => return None,
         };
 
-        let packet = EthernetPacket::new(packet).unwrap();
+        let packet = EthernetPacket::new(&data).unwrap();
 
-        // check for early exit conditions
         if packet.get_ethertype() != EtherTypes::Arp || packet.payload()[7] != 1 {
             return None;
         }
@@ -230,9 +231,20 @@ impl Channel {
         }
 
         // 4. deserialize
-        let packet = Payload::deserialize(opcode, &packet[..].concat());
+        let packet = Payload::deserialize(opcode, &packet[..].concat()).unwrap();
         self.packets.remove(&key);
 
-        packet
+        Some(packet)
+    }
+
+    fn listener(mut channel_rx: Box<dyn DataLinkReceiver>, buffer_tx: Sender<Arc<[u8]>>) {
+        loop {
+            let data = match channel_rx.next() {
+                Ok(packet) => packet,
+                Err(_) => continue,
+            };
+
+            buffer_tx.send(Arc::from(data)).unwrap();
+        }
     }
 }
