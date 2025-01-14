@@ -1,4 +1,3 @@
-use crate::network::{compute_filehash, usable_interfaces, Channel, FileHash, Payload};
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use cursive::{
     traits::{Nameable, Resizable, Scrollable},
@@ -13,6 +12,11 @@ use std::io::prelude::*;
 use std::path::Path;
 use std::thread;
 
+use crate::errors::FloodFileError;
+use crate::network::payload::Payload;
+use crate::network::utils::{compute_filehash, usable_interfaces};
+use crate::network::{Channel, FileHash};
+
 enum DisplayCommand {
     AdvertiseFile(String),
     NewFile(String),
@@ -26,9 +30,16 @@ enum NetworkCommand {
     ChangeInterface(String),
 }
 
+pub fn error_alert() {
+    // notify users of some errors
+}
+
 fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
     let interfaces = usable_interfaces();
-    let mut channel = Channel::new(interfaces[0].clone());
+
+    // move into config struct?
+    // mapping of <interface_name, channel> so threads max out at num of interfaces?
+    let mut channel = Channel::new(interfaces[0].clone()).unwrap();
     let mut shared: HashMap<FileHash, String> = HashMap::new();
     let mut sharing: HashMap<FileHash, String> = HashMap::new();
 
@@ -36,13 +47,28 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
         while let Ok(command) = network_rx.try_recv() {
             match command {
                 NetworkCommand::AdvertiseFile(filepath) => {
-                    let hash = compute_filehash(&filepath);
+                    let hash = match compute_filehash(&filepath) {
+                        Ok(hash) => hash,
+                        _ => continue,
+                    };
+
                     sharing.insert(hash, filepath.clone());
-                    channel.send(Payload::Advertise(filepath));
+                    eprintln!("advertise: {0}", filepath);
+                    match channel.send(Payload::Advertise(filepath)) {
+                        Ok(_) => (),
+                        Err(e) => eprintln!("failed advertise: {0}", e), // TODO: show the error
+                    };
                 }
                 NetworkCommand::RequestFile(file) => {
-                    let hash = compute_filehash(&file);
-                    channel.send(Payload::Download(hash));
+                    let hash = match compute_filehash(&file) {
+                        Ok(hash) => hash,
+                        Err(e) => continue, // TODO: DISPLAY UNABLE TO REQUEST FILE
+                    };
+
+                    match channel.send(Payload::Download(hash)) {
+                        Ok(_) => (),
+                        Err(e) => eprintln!("failed requesting: {0}", e), // TODO: show the error
+                    };
                 }
                 NetworkCommand::ChangeInterface(name) => {
                     if channel.interface_name() == name {
@@ -54,7 +80,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                         .find(|i| i.name == name)
                         .unwrap();
 
-                    channel = Channel::new(interface);
+                    channel = Channel::new(interface).unwrap();
                 }
                 NetworkCommand::UpdateLocalPath(mut path) => {
                     if path.chars().last().unwrap() != '/' {
@@ -67,7 +93,7 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
         }
 
         let packet = channel.recv();
-        if let Some(packet) = packet {
+        if let Ok(Some(packet)) = packet {
             match packet {
                 Payload::File(filehash, data) => {
                     if let Some(filename) = shared.get(&filehash) {
@@ -77,14 +103,21 @@ fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<Netwo
                     }
                 }
                 Payload::Advertise(filepath) => {
-                    let hash = compute_filehash(&filepath);
+                    let hash = match compute_filehash(&filepath) {
+                        Ok(hash) => hash,
+                        Err(_) => continue,
+                    };
+
                     shared.insert(hash, filepath.clone());
                     display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
                 }
                 Payload::Download(hash) => {
                     if let Some(file) = sharing.get(&hash) {
                         let data: Vec<u8> = fs::read(&file).unwrap();
-                        channel.send(Payload::File(hash, data));
+                        match channel.send(Payload::File(hash, data)) {
+                            Ok(_) => (),
+                            Err(e) => eprintln!("failed download: {0}", e), // TODO: show the error
+                        };
                     }
                 }
             }
