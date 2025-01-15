@@ -1,3 +1,3 @@
 fn main() {
-    floodfile::display::run();
+    floodfile::display::start();
 }

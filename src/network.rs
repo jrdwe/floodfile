@@ -9,6 +9,8 @@ use pnet::{
 };
 use rand::prelude::*;
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 
@@ -39,7 +41,7 @@ fn listener_thread(mut channel_rx: Box<dyn DataLinkReceiver>, buffer_tx: Sender<
 
 pub struct Channel {
     src_mac_addr: MacAddr,
-    local_path: String,
+    local_path: PathBuf,
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
     buffer_rx: Receiver<Arc<[u8]>>,
@@ -60,7 +62,7 @@ impl Channel {
 
         Ok(Self {
             src_mac_addr: interface.mac.unwrap(),
-            local_path: String::from("/tmp/"),
+            local_path: std::env::temp_dir(),
             interface,
             tx,
             buffer_rx,
@@ -194,11 +196,16 @@ impl Channel {
         self.interface.name.clone()
     }
 
-    pub fn set_path(&mut self, path: &String) {
-        self.local_path = path.clone();
+    pub fn set_path(&mut self, path: &String) -> Result<(), FloodFileError> {
+        self.local_path = match PathBuf::from_str(path) {
+            Ok(path) => path,
+            Err(_) => return Err(FloodFileError::InvalidDestinationPath),
+        };
+
+        Ok(())
     }
 
-    pub fn get_path(&self) -> String {
+    pub fn get_path(&self) -> PathBuf {
         self.local_path.clone()
     }
 }

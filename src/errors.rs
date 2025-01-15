@@ -2,27 +2,30 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FloodFileError {
-    #[error("Invalid channel type provided.")]
+    #[error("invalid channel type provided.")]
     InvalidChannelType,
 
-    #[error("An error has occurred acquiring channel.")]
+    #[error("an error has occurred acquiring channel.")]
     ChannelError(#[from] std::io::Error),
 
-    #[error("The provided file is too large to reliably send.")]
+    #[error("the provided file is too large to reliably send.")]
     FileTooLarge,
 
-    #[error("The provided packet is too large to send.")]
+    #[error("the provided packet is too large to send.")]
     PacketTooLarge,
 
-    #[error("Unable to send ARP packet over the wire.")]
+    #[error("unable to send ARP packet over the wire.")]
     FailedToSendArp,
 
-    #[error("Unable to serialize ARP packet.")]
+    #[error("unable to serialize ARP packet.")]
     FailedToSerializeArp,
 
-    #[error("Unable to deserialize ARP packet.")]
+    #[error("unable to deserialize ARP packet.")]
     FailedToDeserializeArp,
 
-    #[error("Unable to generate file-hash.")]
+    #[error("unable to generate file-hash.")]
     UnableToGenerateHash,
+
+    #[error("invalid path to save files.")]
+    InvalidDestinationPath,
 }
