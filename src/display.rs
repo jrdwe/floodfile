@@ -54,6 +54,7 @@ pub fn start() {
             match command {
                 DisplayCommand::AdvertiseFile(file) => {
                     if !fs::exists(&file).unwrap() {
+                        alert_user(&mut siv, String::from("file not found"));
                         continue;
                     }
 
