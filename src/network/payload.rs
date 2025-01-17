@@ -6,7 +6,7 @@ use crate::network::FileHash;
 pub enum Payload {
     File(FileHash, Vec<u8>),
     Advertise(String),
-    Download(FileHash),
+    DownloadRequest(FileHash),
 }
 
 impl Payload {
@@ -14,7 +14,7 @@ impl Payload {
         match self {
             Payload::File(_, _) => 0,
             Payload::Advertise(_) => 1,
-            Payload::Download(_) => 2,
+            Payload::DownloadRequest(_) => 2,
         }
     }
 
@@ -25,7 +25,7 @@ impl Payload {
                 [&filehash[..], &data[..]].concat()
             }
             Payload::Advertise(path) => path.as_bytes().to_vec(),
-            Payload::Download(filehash) => filehash.to_vec(),
+            Payload::DownloadRequest(filehash) => filehash.to_vec(),
         }
     }
 
@@ -43,7 +43,7 @@ impl Payload {
             }
             2 => {
                 let hash: FileHash = data[..16].try_into().unwrap();
-                Some(Payload::Download(hash))
+                Some(Payload::DownloadRequest(hash))
             }
             _ => None,
         }
