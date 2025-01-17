@@ -8,6 +8,7 @@ use crate::display::alert::alert_user;
 use crate::display::network_thread::network_thread;
 
 pub mod alert;
+pub mod config;
 pub mod network_thread;
 pub mod path;
 pub mod ui;
@@ -64,12 +65,9 @@ pub fn start() {
                 }
                 DisplayCommand::NewFile(file) => {
                     let n_tx = network_tx.clone();
-                    let d_tx = display_tx.clone();
                     siv.call_on_name("file_list", move |file_list: &mut LinearLayout| {
                         let available =
                             Dialog::around(TextView::new(&file)).button("download", move |_s| {
-                                d_tx.send(DisplayCommand::AlertUser(String::from("downloading..")))
-                                    .unwrap();
                                 n_tx.send(NetworkCommand::RequestFile(file.clone()))
                                     .unwrap();
                             });

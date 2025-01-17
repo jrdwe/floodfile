@@ -11,7 +11,6 @@ use rand::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::thread;
 
 use crate::errors::FloodFileError;
@@ -20,6 +19,7 @@ pub mod payload;
 pub mod utils;
 
 const ETHERNET_HEADER_SIZE: usize = 14;
+const ETHERNET_PACKET_SIZE: usize = 1518;
 // bytes: [preamble (4)] + [opcode(1), total (2), offset (2)] + [key (8)]
 const FLOODFILE_HEADER_SIZE: usize = MSG_PREAMBLE.len() + 5 + 8;
 const MSG_PREAMBLE: &[u8] = b"file";
@@ -28,14 +28,21 @@ const CHUNK_SIZE: usize = u8::MAX as usize - FLOODFILE_HEADER_SIZE;
 pub type Key = [u8; 8];
 pub type FileHash = [u8; 16];
 
-fn listener_thread(mut channel_rx: Box<dyn DataLinkReceiver>, buffer_tx: Sender<Arc<[u8]>>) {
+fn listener_thread(
+    mut channel_rx: Box<dyn DataLinkReceiver>,
+    buffer_tx: Sender<[u8; ETHERNET_PACKET_SIZE]>,
+) {
+    let mut buffer = [0u8; 1518];
     loop {
         let data = match channel_rx.next() {
             Ok(packet) => packet,
             _ => continue,
         };
 
-        buffer_tx.send(Arc::from(data)).ok();
+        let len = data.len().min(1518);
+        buffer[..len].copy_from_slice(&data[..len]);
+
+        buffer_tx.send(buffer).ok();
     }
 }
 
@@ -44,7 +51,7 @@ pub struct Channel {
     local_path: PathBuf,
     interface: NetworkInterface,
     tx: Box<dyn DataLinkSender>,
-    buffer_rx: Receiver<Arc<[u8]>>,
+    buffer_rx: Receiver<[u8; ETHERNET_PACKET_SIZE]>,
     packets: HashMap<Key, Vec<Vec<u8>>>,
 }
 
@@ -57,7 +64,7 @@ impl Channel {
             Err(e) => return Err(FloodFileError::ChannelError(e)),
         };
 
-        let (buffer_tx, buffer_rx) = unbounded::<Arc<[u8]>>();
+        let (buffer_tx, buffer_rx) = unbounded::<[u8; ETHERNET_PACKET_SIZE]>();
         thread::spawn(move || listener_thread(rx, buffer_tx)); // detached
 
         Ok(Self {
@@ -179,7 +186,6 @@ impl Channel {
             packet[offset] = data[13..].to_vec();
         }
 
-        // check if we have a full payload
         let collected: bool = packet.iter().all(|x| !x.is_empty());
         if !collected {
             return Ok(None);

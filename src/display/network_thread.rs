@@ -1,25 +1,17 @@
 use crossbeam::channel::{Receiver, Sender};
-use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::display::config::Config;
 use crate::display::{DisplayCommand, NetworkCommand};
 use crate::network::payload::Payload;
 use crate::network::utils::{compute_filehash, usable_interfaces};
-use crate::network::{Channel, FileHash};
-
-fn send_alert(tx: &Sender<DisplayCommand>, msg: String) {
-    tx.send(DisplayCommand::AlertUser(msg)).unwrap()
-}
 
 pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<NetworkCommand>) {
-    let interfaces = usable_interfaces();
-    let mut channel = Channel::new(interfaces[0].clone()).unwrap();
-    let mut shared: HashMap<FileHash, String> = HashMap::new();
-    let mut sharing: HashMap<FileHash, String> = HashMap::new();
+    let mut cfg = Config::new();
 
     loop {
         while let Ok(command) = network_rx.try_recv() {
@@ -30,11 +22,13 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                         _ => continue,
                     };
 
-                    sharing.insert(hash, filepath.clone());
-                    match channel.send(Payload::Advertise(filepath)) {
+                    cfg.sharing.insert(hash, filepath.clone());
+                    match cfg.channel.send(Payload::Advertise(filepath)) {
                         Ok(_) => (),
                         Err(e) => send_alert(&display_tx, e.to_string()),
                     };
+
+                    send_alert(&display_tx, String::from("sharing!"));
                 }
                 NetworkCommand::RequestFile(file) => {
                     let hash = match compute_filehash(&file) {
@@ -45,13 +39,14 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                         }
                     };
 
-                    match channel.send(Payload::Download(hash)) {
+                    cfg.requested.insert(hash);
+                    match cfg.channel.send(Payload::DownloadRequest(hash)) {
                         Ok(_) => (),
                         Err(e) => send_alert(&display_tx, e.to_string()),
                     };
                 }
                 NetworkCommand::ChangeInterface(name) => {
-                    if channel.interface_name() == name {
+                    if cfg.channel.interface_name() == name {
                         continue;
                     }
 
@@ -60,7 +55,7 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                         .find(|i| i.name == name)
                         .unwrap();
 
-                    channel = Channel::new(interface).unwrap();
+                    cfg = Config::from(interface);
                 }
                 NetworkCommand::UpdateLocalPath(path) => {
                     if !Path::new(&path).is_dir() {
@@ -68,7 +63,7 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                         continue;
                     };
 
-                    match channel.set_path(&path) {
+                    match cfg.channel.set_path(&path) {
                         Ok(_) => (),
                         Err(e) => send_alert(&display_tx, e.to_string()),
                     };
@@ -76,17 +71,22 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
             }
         }
 
-        let packet = channel.recv();
+        let packet = cfg.channel.recv();
         if let Ok(Some(packet)) = packet {
             match packet {
                 Payload::File(filehash, data) => {
-                    if let Some(filename) = shared.get(&filehash) {
+                    if !cfg.requested.contains(&filehash) {
+                        continue;
+                    }
+
+                    cfg.requested.remove(&filehash);
+                    if let Some(filename) = cfg.shared.get(&filehash) {
                         // extrace only the filename
                         let filepath = PathBuf::from(filename);
                         let filename = filepath.file_name().unwrap();
 
                         // destination path + filename
-                        let mut path = channel.get_path();
+                        let mut path = cfg.channel.get_path();
                         path.push(filename);
 
                         // write file to disk!
@@ -103,17 +103,17 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                         Err(_) => continue,
                     };
 
-                    if shared.get(&hash).is_some() {
+                    if cfg.shared.get(&hash).is_some() || cfg.sharing.get(&hash).is_some() {
                         continue;
                     }
 
-                    shared.insert(hash, filepath.clone());
+                    cfg.shared.insert(hash, filepath.clone());
                     display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
                 }
-                Payload::Download(hash) => {
-                    if let Some(file) = sharing.get(&hash) {
+                Payload::DownloadRequest(hash) => {
+                    if let Some(file) = cfg.sharing.get(&hash) {
                         let data: Vec<u8> = fs::read(&file).unwrap();
-                        match channel.send(Payload::File(hash, data)) {
+                        match cfg.channel.send(Payload::File(hash, data)) {
                             Ok(_) => (),
                             Err(e) => send_alert(&display_tx, e.to_string()),
                         };
@@ -122,4 +122,8 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
             }
         }
     }
+}
+
+fn send_alert(tx: &Sender<DisplayCommand>, msg: String) {
+    tx.send(DisplayCommand::AlertUser(msg)).unwrap()
 }

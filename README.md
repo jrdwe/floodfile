@@ -1,27 +1,31 @@
-## floodfile
+## Floodfile
 
-unsecure file transfer over arp - share your private-keys to the entire network!
+Unsecure file transfer over arp!
 
 ![floodfile tui](assets/interface.jpg)
 
-## usage 
+## Usage 
 
-the application does it's best to catch all the packets but it's unreliable. smaller files have a higher chance of success.
+The application broadcasts files to the network for your friends to download. It gets super unreliable with large files and can be very loud over the network.
 
-1. choose your interface to share on
-2. submit the relative or absolute path of the file to share
-3. let your friend download it!
+1. Select your network interface to share on
+2. Enter the path of the file to share.
+3. Let your friend download it!
 
-## installation
+By default the application will save files into the tmp directory. This can be changed via the menu-bar.
 
-download the current release at the following [link](https://github.com/jrdwe/floodfile/releases/latest)
+## Install
 
-**linux**: `sudo setcap CAP_NET_RAW+ep floodfile` to set the correct network permissions
+Download the current [release](https://github.com/jrdwe/floodfile/releases/latest) for your operating system
 
-**windows**: you will require npcap with winpcap api to run the program
+### Linux requirements
 
-by default the application (if working correctly) saves files into your tmp directory. this can be changed via menubar.
+Requires the correct network permissions w/ `sudo setcap CAP_NET_RAW+ep floodfile` 
 
-## credit + motivation
+### Windows requirements
 
-this project was heavily inspired/adapted by [arpchat](https://github.com/kognise/arpchat) by kognise and was built to teach myself a little rust
+Requires either `winpcap` or `npcap with winpcap api` to be installed.
+
+## Credit + Motivation
+
+This project was heavily inspired/adapted by [arpchat](https://github.com/kognise/arpchat) by kognise and was built to help myself learn rust
