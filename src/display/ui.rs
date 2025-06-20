@@ -17,7 +17,7 @@ fn create_file_input(display_tx: &Sender<DisplayCommand>) -> Panel<NamedView<Edi
                 move |siv, name: &str| {
                     siv.call_on_name("file_input", |field: &mut EditView| field.set_content(""));
                     tx.send(DisplayCommand::AdvertiseFile(name.to_string()))
-                        .unwrap()
+                        .expect("Error: unable to advertise file.")
                 }
             })
             .with_name("file_input"),
@@ -28,16 +28,21 @@ fn create_file_input(display_tx: &Sender<DisplayCommand>) -> Panel<NamedView<Edi
 fn create_interface_select(display_tx: &Sender<DisplayCommand>) -> Panel<SelectView> {
     Panel::new(
         SelectView::new()
-            .with_all(
-                usable_interfaces()
-                    .into_iter()
-                    .map(|i| (format!("{0}: {1}", i.name, i.mac.unwrap()), i.name)),
-            )
+            .with_all(usable_interfaces().into_iter().map(|i| {
+                (
+                    format!(
+                        "{0}: {1}",
+                        i.name,
+                        i.mac.expect("Error: interface missing mac address.")
+                    ),
+                    i.name,
+                )
+            }))
             .on_submit({
                 let tx = display_tx.clone();
                 move |_, name: &String| {
                     tx.send(DisplayCommand::ChangeInterface(name.to_string()))
-                        .unwrap()
+                        .expect("Error: unable to change interface.")
                 }
             }),
     )

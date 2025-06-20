@@ -16,7 +16,8 @@ impl Config {
         let interfaces = usable_interfaces();
 
         Config {
-            channel: Channel::new(interfaces[0].clone()).unwrap(),
+            channel: Channel::new(interfaces[0].clone())
+                .expect("Error: failed to create network channel."),
             shared: HashMap::new(),
             sharing: HashMap::new(),
             requested: HashSet::new(),
@@ -25,7 +26,7 @@ impl Config {
 
     pub fn from(interface: NetworkInterface) -> Self {
         Config {
-            channel: Channel::new(interface).unwrap(),
+            channel: Channel::new(interface).expect("Error: failed to create network channel."),
             shared: HashMap::new(),
             sharing: HashMap::new(),
             requested: HashSet::new(),

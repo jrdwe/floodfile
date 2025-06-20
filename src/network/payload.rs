@@ -32,17 +32,31 @@ impl Payload {
     pub fn deserialize(opcode: u8, data: &[u8]) -> Option<Payload> {
         match opcode {
             0 => {
-                let hash: FileHash = data[0..16].try_into().unwrap();
-                let file_compressed = data[16..].try_into().unwrap();
-                let file = decompress_size_prepended(file_compressed).unwrap();
+                // need at least 16 bytes for hash
+                if data.len() < 16 {
+                    return None;
+                }
+
+                // extract file hash from first 16 bytes
+                let hash: FileHash = data[0..16].try_into().ok()?;
+
+                // decompress remaining data
+                let file_compressed = &data[16..];
+                let file = decompress_size_prepended(file_compressed).ok()?;
+
                 Some(Payload::File(hash, file))
             }
             1 => {
-                let path: String = std::str::from_utf8(&data[..]).unwrap().to_string();
+                let path = std::str::from_utf8(data).ok()?.to_string();
                 Some(Payload::Advertise(path))
             }
             2 => {
-                let hash: FileHash = data[..16].try_into().unwrap();
+                // need exactly 16 bytes for hash
+                if data.len() < 16 {
+                    return None;
+                }
+
+                let hash: FileHash = data[0..16].try_into().ok()?;
                 Some(Payload::DownloadRequest(hash))
             }
             _ => None,

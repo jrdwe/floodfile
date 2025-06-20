@@ -12,7 +12,7 @@ pub fn change_path(siv: &mut Cursive, network_tx: &Sender<NetworkCommand>) {
             let tx = network_tx.clone();
             move |siv, name: &str| {
                 tx.send(NetworkCommand::UpdateLocalPath(name.to_string()))
-                    .unwrap();
+                    .expect("Error: unable to update path.");
 
                 siv.pop_layer();
             }

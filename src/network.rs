@@ -68,7 +68,9 @@ impl Channel {
         thread::spawn(move || listener_thread(rx, buffer_tx)); // detached
 
         Ok(Self {
-            src_mac_addr: interface.mac.unwrap(),
+            src_mac_addr: interface
+                .mac
+                .expect("Error: interface missing mac address."),
             local_path: std::env::temp_dir(),
             interface,
             tx,
