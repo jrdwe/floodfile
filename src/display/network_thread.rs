@@ -53,7 +53,7 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                     let interface = usable_interfaces()
                         .into_iter()
                         .find(|i| i.name == name)
-                        .unwrap();
+                        .expect("Error: selected interface no longer available.");
 
                     cfg = Config::from(interface);
                 }
@@ -81,20 +81,29 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
 
                     cfg.requested.remove(&filehash);
                     if let Some(filename) = cfg.shared.get(&filehash) {
-                        // extrace only the filename
+                        // extract only the filename
                         let filepath = PathBuf::from(filename);
-                        let filename = filepath.file_name().unwrap();
+                        let filename = filepath
+                            .file_name()
+                            .expect("Error: invalid filename in shared file.");
 
                         // destination path + filename
                         let mut path = cfg.channel.get_path();
                         path.push(filename);
 
                         // write file to disk!
-                        let mut file = File::create(&path).unwrap();
-                        file.write_all(&data).unwrap();
+                        let mut file = File::create(&path).expect("Error: failed to create file.");
+                        file.write_all(&data)
+                            .expect("Error: failed to write download file.");
 
                         // notify user!
-                        send_alert(&display_tx, format!("saved: {0}", path.to_str().unwrap()))
+                        send_alert(
+                            &display_tx,
+                            format!(
+                                "saved: {0}",
+                                path.to_str().expect("Error: invalid path encoding.")
+                            ),
+                        )
                     }
                 }
                 Payload::Advertise(filepath) => {
@@ -108,11 +117,14 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
                     }
 
                     cfg.shared.insert(hash, filepath.clone());
-                    display_tx.send(DisplayCommand::NewFile(filepath)).unwrap()
+                    display_tx
+                        .send(DisplayCommand::NewFile(filepath))
+                        .expect("Error: unable to advertise new file.")
                 }
                 Payload::DownloadRequest(hash) => {
                     if let Some(file) = cfg.sharing.get(&hash) {
-                        let data: Vec<u8> = fs::read(&file).unwrap();
+                        let data: Vec<u8> =
+                            fs::read(&file).expect("Error: failed to read shared file.");
                         match cfg.channel.send(Payload::File(hash, data)) {
                             Ok(_) => (),
                             Err(e) => send_alert(&display_tx, e.to_string()),
@@ -125,5 +137,6 @@ pub fn network_thread(display_tx: Sender<DisplayCommand>, network_rx: Receiver<N
 }
 
 fn send_alert(tx: &Sender<DisplayCommand>, msg: String) {
-    tx.send(DisplayCommand::AlertUser(msg)).unwrap()
+    tx.send(DisplayCommand::AlertUser(msg))
+        .expect("Error: unable to display alert to user.")
 }

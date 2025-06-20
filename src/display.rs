@@ -37,7 +37,10 @@ pub fn start() {
     });
 
     let mut siv = cursive::default();
-    siv.load_toml(include_str!("../assets/theme.toml")).unwrap();
+
+    // load theme or exit with user-friendly error
+    siv.load_toml(include_str!("../assets/theme.toml"))
+        .expect("Error: Unable to load application theme. Please restart the application.");
 
     siv.menubar().add_leaf("quit", |siv| siv.quit());
     siv.menubar().add_leaf("storage-path", {
@@ -59,9 +62,10 @@ pub fn start() {
                         continue;
                     }
 
+                    // send file to network thread
                     network_tx
                         .send(NetworkCommand::AdvertiseFile(file.clone()))
-                        .unwrap();
+                        .expect("Error: network thread has died.");
                 }
                 DisplayCommand::NewFile(file) => {
                     let n_tx = network_tx.clone();
@@ -69,7 +73,7 @@ pub fn start() {
                         let available =
                             Dialog::around(TextView::new(&file)).button("download", move |_s| {
                                 n_tx.send(NetworkCommand::RequestFile(file.clone()))
-                                    .unwrap();
+                                    .expect("Error: unable to request file.");
                             });
 
                         file_list.add_child(available);
@@ -78,7 +82,7 @@ pub fn start() {
                 DisplayCommand::ChangeInterface(interface) => {
                     network_tx
                         .send(NetworkCommand::ChangeInterface(interface.clone()))
-                        .unwrap();
+                        .expect("Error: unable to change interface");
 
                     siv.call_on_name("file_list", |file_list: &mut LinearLayout| {
                         file_list.clear();
